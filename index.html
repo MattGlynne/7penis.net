@@ -9,17 +9,16 @@
   <img id="hero" alt="" style="max-width:100%;max-height:100vh;" />
 
   <script>
-    const BASE = "7penisdotnet";
+    // --- CONFIG ---
+    const BASE_FILE = "7penisdotnet.JPG"; // shown once per browser session
+    const PREFIX = "7penisdotnet";        // numbered files
+    const EXT = ".JPG";
 
-    // Try multiple extensions + cases (GitHub Pages is case-sensitive)
-    const EXTS = [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG", ".webp", ".WEBP"];
-
-    const MAX = 9999;              // highest number to try
+    const MAX = 999;               // highest number to try
     const MISS_STREAK_LIMIT = 15;  // stop after this many consecutive misses
     const MAX_FOUND = 100;         // cap list size for speed
 
-    const found = [];
-
+    // --- helpers ---
     function exists(src) {
       return new Promise(resolve => {
         const img = new Image();
@@ -29,14 +28,7 @@
       });
     }
 
-    async function firstExisting(candidates) {
-      for (const c of candidates) {
-        if (await exists(c)) return c;
-      }
-      return null;
-    }
-
-    function pickRandom(arr, avoid) {
+    function pickUniform(arr, avoid) {
       if (arr.length === 1) return arr[0];
       let pick = arr[Math.floor(Math.random() * arr.length)];
       if (avoid && pick === avoid) {
@@ -45,78 +37,66 @@
       return pick;
     }
 
-    async function preload(src) {
-      return new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => resolve(true);
-        img.onerror = () => resolve(false);
-        img.src = src;
-      });
+    function preload(src) {
+      if (!src) return;
+      const img = new Image();
+      img.src = src;
     }
 
-    async function discoverAndShowQuickly() {
-      const hero = document.getElementById("hero");
-
-      // 1) Try base file with no number: 7penisdotnet.jpg / .JPG / etc
-      {
-        const candidates = EXTS.map(ext => `${BASE}${ext}`);
-        const hit = await firstExisting(candidates);
-        if (hit) {
-          found.push(hit);
-          // show immediately if nothing is showing yet
-          if (!hero.src) hero.src = hit;
-        }
-      }
-
-      // 2) Try numbered files: 7penisdotnet1.jpg, 2, 3...
+    async function discoverAvailable() {
+      const available = [];
       let missStreak = 0;
 
-      for (let i = 1; i <= MAX && found.length < MAX_FOUND; i++) {
-        const candidates = EXTS.map(ext => `${BASE}${i}${ext}`);
-        const hit = await firstExisting(candidates);
-
-        if (hit) {
-          found.push(hit);
+      for (let i = 1; i <= MAX && available.length < MAX_FOUND; i++) {
+        const file = `${PREFIX}${i}${EXT}`;
+        if (await exists(file)) {
+          available.push(file);
           missStreak = 0;
-
-          // show the first numbered hit ASAP if we still haven't displayed anything
-          if (!document.getElementById("hero").src) {
-            document.getElementById("hero").src = hit;
-          }
         } else {
           missStreak++;
-          if (missStreak >= MISS_STREAK_LIMIT) break; // stop scanning forever
+          if (missStreak >= MISS_STREAK_LIMIT) break;
         }
       }
+      return available;
     }
 
     async function main() {
       const hero = document.getElementById("hero");
 
-      await discoverAndShowQuickly();
+      // 1) Show base image once per browser session
+      if (sessionStorage.getItem("hasShownBase") !== "1") {
+        hero.src = BASE_FILE;
+        sessionStorage.setItem("hasShownBase", "1");
+        sessionStorage.setItem("lastShown", BASE_FILE);
 
-      if (found.length === 0) {
-        console.error("No images found. Check filenames + extensions/case.");
-        // Optional: show something visible instead of blank
-        hero.alt = "No images found.";
+        const available = await discoverAvailable();
+        const next = pickUniform(available, BASE_FILE);
+        preload(next);
+        sessionStorage.setItem("nextImage", next || "");
         return;
       }
 
-      const lastShown = sessionStorage.getItem("lastShown") || "";
-      const cachedNext = sessionStorage.getItem("nextImage") || "";
+      // 2) Uniform random among available numbered images
+      const available = await discoverAvailable();
+      if (available.length === 0) {
+        hero.src = BASE_FILE;
+        return;
+      }
 
-      // Use preloaded "next" if valid, otherwise random
-      const current = (cachedNext && found.includes(cachedNext))
+      const cachedNext = sessionStorage.getItem("nextImage") || "";
+      const lastShown = sessionStorage.getItem("lastShown") || "";
+
+      const current = (cachedNext && available.includes(cachedNext))
         ? cachedNext
-        : pickRandom(found, lastShown);
+        : pickUniform(available, lastShown);
 
       hero.src = current;
       sessionStorage.setItem("lastShown", current);
 
-      // Preload next for faster reload feel
-      const next = pickRandom(found, current);
-      preload(next); // don't await; keep page snappy
-      sessionStorage.setItem("nextImage", next);
+      // Preload next image
+      const next = pickUniform(available, current);
+      preload(next);
+      sessionStorage.setItem("nextImage", next || "");
     }
 
     main();
