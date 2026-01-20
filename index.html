@@ -10,14 +10,17 @@
 
   <script>
     const BASE = "7penisdotnet";
-    const EXT = ".jpg";
-    const MAX = 9999;          // highest number to try
-    const CHECK_LIMIT = 10;    // how many valid images we want before stopping
-    const PRELOAD_COUNT = 1;   // keep 1 next image preloaded
+
+    // Try multiple extensions + cases (GitHub Pages is case-sensitive)
+    const EXTS = [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG", ".webp", ".WEBP"];
+
+    const MAX = 9999;              // highest number to try
+    const MISS_STREAK_LIMIT = 15;  // stop after this many consecutive misses
+    const MAX_FOUND = 100;         // cap list size for speed
 
     const found = [];
 
-    function tryLoad(src) {
+    function exists(src) {
       return new Promise(resolve => {
         const img = new Image();
         img.onload = () => resolve(true);
@@ -26,64 +29,94 @@
       });
     }
 
-    function preload(src) {
-      return new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => resolve(true);
-        img.onerror = () => resolve(false);
-        img.src = src;
-      });
+    async function firstExisting(candidates) {
+      for (const c of candidates) {
+        if (await exists(c)) return c;
+      }
+      return null;
     }
 
-    function pickRandom(arr, last) {
+    function pickRandom(arr, avoid) {
       if (arr.length === 1) return arr[0];
       let pick = arr[Math.floor(Math.random() * arr.length)];
-      if (last && pick === last) {
+      if (avoid && pick === avoid) {
         pick = arr[(arr.indexOf(pick) + 1) % arr.length];
       }
       return pick;
     }
 
-    async function discoverImages() {
-      // Always try base filename first (no number)
-      const baseFile = `${BASE}${EXT}`;
-      if (await tryLoad(baseFile)) found.push(baseFile);
+    async function preload(src) {
+      return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve(true);
+        img.onerror = () => resolve(false);
+        img.src = src;
+      });
+    }
 
-      // Try numbered files
-      for (let i = 1; i <= MAX && found.length < CHECK_LIMIT; i++) {
-        const name = `${BASE}${i}${EXT}`;
-        if (await tryLoad(name)) found.push(name);
+    async function discoverAndShowQuickly() {
+      const hero = document.getElementById("hero");
+
+      // 1) Try base file with no number: 7penisdotnet.jpg / .JPG / etc
+      {
+        const candidates = EXTS.map(ext => `${BASE}${ext}`);
+        const hit = await firstExisting(candidates);
+        if (hit) {
+          found.push(hit);
+          // show immediately if nothing is showing yet
+          if (!hero.src) hero.src = hit;
+        }
+      }
+
+      // 2) Try numbered files: 7penisdotnet1.jpg, 2, 3...
+      let missStreak = 0;
+
+      for (let i = 1; i <= MAX && found.length < MAX_FOUND; i++) {
+        const candidates = EXTS.map(ext => `${BASE}${i}${ext}`);
+        const hit = await firstExisting(candidates);
+
+        if (hit) {
+          found.push(hit);
+          missStreak = 0;
+
+          // show the first numbered hit ASAP if we still haven't displayed anything
+          if (!document.getElementById("hero").src) {
+            document.getElementById("hero").src = hit;
+          }
+        } else {
+          missStreak++;
+          if (missStreak >= MISS_STREAK_LIMIT) break; // stop scanning forever
+        }
       }
     }
 
     async function main() {
-      await discoverImages();
+      const hero = document.getElementById("hero");
+
+      await discoverAndShowQuickly();
 
       if (found.length === 0) {
-        console.error("No images found");
+        console.error("No images found. Check filenames + extensions/case.");
+        // Optional: show something visible instead of blank
+        hero.alt = "No images found.";
         return;
       }
 
       const lastShown = sessionStorage.getItem("lastShown") || "";
       const cachedNext = sessionStorage.getItem("nextImage") || "";
 
-      // If we have a preselected "next" image AND it's in our found list, use it
-      let current = (cachedNext && found.includes(cachedNext))
+      // Use preloaded "next" if valid, otherwise random
+      const current = (cachedNext && found.includes(cachedNext))
         ? cachedNext
         : pickRandom(found, lastShown);
 
-      // Show current ASAP
-      const hero = document.getElementById("hero");
       hero.src = current;
       sessionStorage.setItem("lastShown", current);
 
-      // Pick and preload the next image(s)
-      // (store for the next refresh so it likely hits cache immediately)
-      let next = pickRandom(found, current);
-      await preload(next);
+      // Preload next for faster reload feel
+      const next = pickRandom(found, current);
+      preload(next); // don't await; keep page snappy
       sessionStorage.setItem("nextImage", next);
-
-      // If you ever want to queue more than 1, you can extend this later.
     }
 
     main();
